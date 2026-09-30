@@ -11,8 +11,11 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     
-    <!-- PayPal SDK -->
-    <script src="https://www.paypal.com/sdk/js?client-id=BAA_ZsUMEthCCVy8ZIMdw2QiCNUcTQH6YZnM_3h59LvGCuV_v-BvrEUCilJEeTRC5QK2IqSpjLB_PdMwZk&currency=USD&components=buttons,hosted-fields"></script>
+    <!-- PayPal SDK se carga de forma segura con un client token generado por el backend. -->
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Solana Web3.js (browser bundle) -->
+    <script src="https://unpkg.com/@solana/web3.js@1.99.0/lib/index.iife.min.js"></script>
 
     <style>
         body {
@@ -49,6 +52,46 @@
             animation: cloudMove 25s linear infinite;
         }
         #dashboardSection { padding-bottom: 6.5rem; }
+        /* PayPal Advanced Card Fields: the hosted iframes need an explicit height. */
+        /* PayPal-hosted card fields: visual style matches the site's dark checkout. */
+        .paypal-card-field {
+            position: relative;
+            z-index: 60;
+            min-height: 48px;
+            height: 48px;
+            width: 100%;
+            overflow: visible;
+            display: block;
+            background: #020617;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 0 12px;
+            box-sizing: border-box;
+            pointer-events: auto !important;
+            user-select: text;
+        }
+        .paypal-card-field:focus-within {
+            border-color: #f59e0b;
+            box-shadow: 0 0 0 1px rgba(245,158,11,.35);
+        }
+        .paypal-card-field iframe {
+            display: block !important;
+            position: relative !important;
+            z-index: 61 !important;
+            width: 100% !important;
+            height: 46px !important;
+            min-height: 46px !important;
+            border: 0 !important;
+            pointer-events: auto !important;
+        }
+        .paypal-card-field > * {
+            pointer-events: auto !important;
+        }
+        #cardPaymentSubmit:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
         /* Modal Backdrop */
         .modal-blur {
             backdrop-filter: blur(8px);
@@ -165,7 +208,7 @@
                     <span id="speedDisplay" class="text-3xl font-extrabold text-emerald-400 font-fredoka">0.00000965</span>
                     <span class="text-emerald-500 font-bold text-sm">$MEOW / seg</span>
                 </div>
-                <div class="text-[11px] text-slate-500 mt-2" id="speedBoostInfo">25 $MEOW / 30 días</div>
+                <div class="text-[11px] text-slate-500 mt-2" id="speedBoostInfo">Producción base + paquetes activos</div>
             </div>
 
             <!-- Extra Cats Miners Card -->
@@ -303,7 +346,7 @@
 
     <!-- BOTTOM APP NAVIGATION -->
     <nav id="bottomNav" class="hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800">
-        <div class="max-w-2xl mx-auto grid grid-cols-4">
+        <div class="max-w-2xl mx-auto grid grid-cols-5">
             <button onclick="showAppTab('home')" class="app-tab py-3 text-[11px] text-amber-400 flex flex-col items-center gap-1" data-tab="home">
                 <i class="fa-solid fa-house text-lg"></i><span>Inicio</span>
             </button>
@@ -315,6 +358,9 @@
             </button>
             <button onclick="showAppTab('profile')" class="app-tab py-3 text-[11px] text-slate-400 flex flex-col items-center gap-1" data-tab="profile">
                 <i class="fa-solid fa-user text-lg"></i><span>Perfil</span>
+            </button>
+            <button onclick="showAppTab('wallet')" class="app-tab py-3 text-[11px] text-slate-400 flex flex-col items-center gap-1" data-tab="wallet">
+                <i class="fa-solid fa-wallet text-lg"></i><span>Wallet</span>
             </button>
         </div>
     </nav>
@@ -363,6 +409,136 @@
                     </div>
                 </div>
             </div>
+
+            <div id="walletPanel" class="app-panel hidden space-y-5">
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold font-fredoka text-amber-400">Wallet Solana</h2>
+                            <p class="text-sm text-slate-400 mt-2">Conecta una wallet de Solana para consultar tus activos en la cadena.</p>
+                        </div>
+                        <div class="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-violet-500/10 text-violet-300 border border-violet-500/20">Solana Mainnet</div>
+                    </div>
+
+                    <div class="mt-5 bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="text-xs text-slate-500 uppercase font-semibold">Wallet conectada</div>
+                                <div id="solanaWalletAddress" class="text-sm text-slate-200 mt-1 break-all">No conectada</div>
+                            </div>
+                            <button id="connectWalletBtn" onclick="connectSolanaWallet()" class="shrink-0 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs">Conectar</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                        <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                            <div class="text-xs text-slate-500">Saldo de minería (interno)</div>
+                            <div id="walletMiningBalance" class="text-xl font-bold text-amber-400 mt-1">0.0000</div>
+                            <div class="text-[10px] text-slate-600 mt-1">$MEOW • pendiente de emisión on-chain</div>
+                        </div>
+                        <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                            <div class="text-xs text-slate-500">$MEOW en blockchain</div>
+                            <div id="walletMeowBalance" class="text-xl font-bold text-emerald-400 mt-1">Pendiente</div>
+                            <div class="text-[10px] text-slate-600 mt-1">Saldo on-chain verificable</div>
+                        </div>
+                        <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                            <div class="text-xs text-slate-500">USDT (Solana / SPL)</div>
+                            <div id="walletUsdtBalance" class="text-xl font-bold text-cyan-400 mt-1">0.0000</div>
+                            <div class="text-[10px] text-slate-600 mt-1">USD₮</div>
+                        </div>
+                    </div>
+                    <div class="flex justify-end mt-4">
+                        <button onclick="refreshWalletBalances()" class="text-xs text-slate-400 hover:text-white"><i class="fa-solid fa-rotate mr-1"></i> Actualizar saldos</button>
+                    </div>
+                    <div class="mt-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl p-3 text-[11px] text-slate-400 leading-relaxed">
+                        El saldo de minería se mantiene separado del saldo on-chain. Cuando el sistema de minería emita los $MEOW a tu wallet, aparecerán como <strong class="text-emerald-300">$MEOW en blockchain</strong> y entonces podrán entrar al flujo de intercambio.
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h3 class="text-xl font-bold font-fredoka text-white">Intercambiar $MEOW → USDT</h3>
+                            <p class="text-sm text-slate-400 mt-2">Convierte tu $MEOW disponible en USDT y especifica exactamente dónde quieres recibirlo.</p>
+                        </div>
+                        <i class="fa-solid fa-arrow-right-arrow-left text-cyan-400 text-xl"></i>
+                    </div>
+
+                    <div class="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                            <div class="flex justify-between text-xs text-slate-500">
+                                <span>Saldo $MEOW en blockchain</span>
+                                <span><span id="swapMeowAvailable">0.0000</span> MEOW</span>
+                            </div>
+                            <div class="flex items-center gap-3 mt-2">
+                                <input id="swapMeowAmount" type="number" min="0" step="any" placeholder="0.00" oninput="clearSwapQuote()" class="min-w-0 flex-1 bg-transparent text-2xl font-bold text-white outline-none">
+                                <div class="px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 font-bold text-sm">$MEOW</div>
+                            </div>
+                            <button type="button" onclick="fillMaxMeowAmount()" class="mt-3 text-xs text-amber-300 hover:text-amber-200 font-semibold">Usar saldo máximo</button>
+                        </div>
+
+                        <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                            <div class="text-xs text-slate-500">Recibes aproximadamente</div>
+                            <div class="flex items-center gap-3 mt-2">
+                                <div id="swapUsdtOutput" class="min-w-0 flex-1 text-2xl font-bold text-white">0.0000</div>
+                                <div class="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 font-bold text-sm">USDT</div>
+                            </div>
+                            <div id="swapRateOutput" class="text-[11px] text-slate-500 mt-2">Cotización todavía no consultada.</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                        <div class="text-xs text-slate-500 uppercase font-semibold">Red de USDT para recibir</div>
+                        <select id="withdrawalNetwork" onchange="updateWithdrawalNetworkUI(); clearSwapQuote();" class="w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-slate-100 text-sm focus:outline-none focus:border-cyan-500">
+                            <option value="ethereum">Ethereum (ERC-20)</option>
+                            <option value="tron">Tron (TRC-20)</option>
+                            <option value="solana">Solana (SPL)</option>
+                        </select>
+                        <div id="withdrawalNetworkHint" class="mt-2 text-[11px] text-slate-500 leading-relaxed">Copia desde tu wallet o exchange la dirección de depósito de USDT en Ethereum (ERC-20).</div>
+                    </div>
+
+                    <div class="mt-4 bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                        <div class="flex items-center justify-between gap-3">
+                            <label for="withdrawalAddress" class="text-xs text-slate-500 uppercase font-semibold">Dirección de recepción</label>
+                            <span class="text-[10px] text-rose-300">Solo dirección pública</span>
+                        </div>
+                        <textarea id="withdrawalAddress" rows="3" oninput="updateWithdrawalControls()" placeholder="Pega aquí la dirección de depósito de USDT" class="w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-slate-100 placeholder-slate-600 text-sm focus:outline-none focus:border-cyan-500 resize-none"></textarea>
+                        <div class="mt-2 text-[11px] text-slate-600">Nunca introduzcas aquí tu frase de recuperación, clave privada, PIN o contraseña.</div>
+                    </div>
+
+                    <div class="mt-4 bg-amber-500/5 border border-amber-500/15 rounded-2xl p-4">
+                        <div class="flex gap-3 items-start">
+                            <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+                            <div class="text-[11px] text-slate-400 leading-relaxed">
+                                <strong class="text-amber-300">La red debe coincidir exactamente.</strong> Por ejemplo, una dirección de Tron no debe utilizarse para un retiro enviado por Ethereum. Antes de confirmar, revisa la red y la dirección en tu wallet o exchange.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div class="bg-slate-950 rounded-xl p-3 border border-slate-800"><div class="text-slate-600">Red</div><div id="reviewNetwork" class="text-slate-200 font-bold mt-1">Ethereum (ERC-20)</div></div>
+                        <div class="bg-slate-950 rounded-xl p-3 border border-slate-800"><div class="text-slate-600">Comisión</div><div id="withdrawalFeeOutput" class="text-slate-200 font-bold mt-1">Se calculará</div></div>
+                        <div class="bg-slate-950 rounded-xl p-3 border border-slate-800"><div class="text-slate-600">Estado</div><div id="withdrawalStatus" class="text-amber-300 font-bold mt-1">Esperando cotización</div></div>
+                    </div>
+
+                    <div id="swapQuoteInfo" class="mt-4 bg-slate-950/70 rounded-2xl p-4 border border-slate-800 text-xs text-slate-400">
+                        Conecta tu wallet de Solana, asegúrate de tener $MEOW on-chain y consulta una cotización. El destino de USDT se especifica aparte mediante una dirección pública compatible con la red elegida.
+                    </div>
+
+                    <button id="getSwapQuoteBtn" onclick="getMeowUsdtQuote()" disabled class="w-full mt-4 py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed">
+                        Obtener cotización
+                    </button>
+                    <button id="executeSwapBtn" onclick="prepareUsdtWithdrawal()" disabled class="w-full mt-3 py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed">
+                        Revisar conversión y retiro
+                    </button>
+
+                    <div id="withdrawalReviewBox" class="hidden mt-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-4">
+                        <div class="text-sm font-bold text-cyan-300">Revisión antes de enviar</div>
+                        <div id="withdrawalReviewText" class="text-xs text-slate-400 mt-2 leading-relaxed"></div>
+                        <button onclick="submitUsdtWithdrawalRequest()" class="w-full mt-3 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl">Confirmar solicitud</button>
+                        <div class="text-[10px] text-slate-600 mt-2">La transferencia on-chain se habilitará cuando conectemos el backend de liquidación/cross-chain. Esta interfaz no fingirá una transferencia real mientras ese componente no exista.</div>
+                    </div>
+                </div>
 
             <div id="profilePanel" class="app-panel hidden space-y-5">
                 <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6">
@@ -419,7 +595,7 @@
         </div>
     </section>
 
-    <!-- PAYMENT MODAL WITH CREDIT/DEBIT CARD FORM & PAYPAL -->
+    <!-- SECURE PAYPAL CHECKOUT -->
     <div id="paymentModal" class="fixed inset-0 bg-slate-950/80 modal-blur z-50 hidden flex items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             
@@ -431,14 +607,14 @@
             <!-- Modal Title & Item Info -->
             <div class="text-center mb-6">
                 <div class="inline-block p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl mb-2 text-2xl">💳</div>
-                <h3 class="text-2xl font-bold font-fredoka text-white">Ingresa tu Tarjeta de Débito o Crédito</h3>
+                <h3 class="text-2xl font-bold font-fredoka text-white">Completa tu pago de forma segura</h3>
                 <p id="modalItemTitle" class="text-amber-400 font-medium text-sm mt-1">Paquete de Velocidad +1,000 $MEOW ($10 USD)</p>
                 <div id="modalItemPrice" class="text-3xl font-extrabold text-white font-fredoka mt-2">$10.00 USD</div>
             </div>
 
             <!-- Card Acceptance Badges -->
-            <div class="bg-slate-950 p-3 rounded-2xl border border-slate-800 mb-6 flex items-center justify-between text-xs text-slate-400">
-                <span>Aceptamos tarjetas:</span>
+            <div class="bg-slate-950 p-3 rounded-2xl border border-slate-800 mb-5 flex items-center justify-between text-xs text-slate-400">
+                <span>Aceptamos tarjetas de crédito y débito:</span>
                 <div class="flex space-x-2 text-xl">
                     <i class="fa-brands fa-cc-visa text-blue-400"></i>
                     <i class="fa-brands fa-cc-mastercard text-orange-400"></i>
@@ -447,36 +623,46 @@
                 </div>
             </div>
 
-            <!-- DIRECT CREDIT CARD FORM -->
-            <form id="creditCardForm" onsubmit="processCardPayment(event)" class="space-y-4 mb-6">
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Nombre en la Tarjeta</label>
-                    <input type="text" id="cardHolderName" required placeholder="Nombre Apellido" class="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-200 placeholder-slate-600 text-sm focus:outline-none focus:border-amber-500">
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Número de Tarjeta</label>
-                    <div class="relative">
-                        <input type="text" id="cardNumber" required maxlength="19" placeholder="4532 •••• •••• 8892" class="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-4 pr-10 text-slate-200 placeholder-slate-600 text-sm focus:outline-none focus:border-amber-500" oninput="formatCardNumber(this)">
-                        <i class="fa-regular fa-credit-card absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
+            <div class="bg-emerald-500/5 border border-emerald-500/15 rounded-2xl p-4 mb-5">
+                <div class="flex gap-3 items-start">
+                    <i class="fa-solid fa-shield-halved text-emerald-400 mt-0.5"></i>
+                    <div class="text-xs text-slate-300 leading-relaxed">
+                        <strong class="text-emerald-300">Pago seguro:</strong>
+                        los campos de número, vencimiento y CVV son alojados por PayPal. Tu página no recibe ni almacena esos datos.
                     </div>
                 </div>
+            </div>
 
-                <div class="grid grid-cols-2 gap-4">
+            <!-- PAYPAL HOSTED CARD FIELDS -->
+            <div id="cardPaymentSection" class="mb-6">
+                <div class="text-sm font-bold text-white mb-3">Pagar con tarjeta</div>
+                <div class="space-y-3">
                     <div>
-                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Expiración (MM/AA)</label>
-                        <input type="text" id="cardExpiry" required maxlength="5" placeholder="MM/AA" class="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-200 placeholder-slate-600 text-sm focus:outline-none focus:border-amber-500" oninput="formatExpiry(this)">
+                        <label class="text-xs text-slate-400">Nombre del titular</label>
+                        <div id="card-name-field-container" class="paypal-card-field mt-1"><span class="text-slate-400 text-sm">Cargando campo seguro de PayPal…</span></div>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Código CVV / CVC</label>
-                        <input type="password" id="cardCvv" required maxlength="4" placeholder="123" class="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 text-slate-200 placeholder-slate-600 text-sm focus:outline-none focus:border-amber-500">
+                        <label class="text-xs text-slate-400">Número de tarjeta</label>
+                        <div id="card-number-field-container" class="paypal-card-field mt-1"><span class="text-slate-400 text-sm">Cargando campo seguro de PayPal…</span></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs text-slate-400">Vencimiento</label>
+                            <div id="card-expiry-field-container" class="paypal-card-field mt-1"><span class="text-slate-400 text-sm">Cargando campo seguro de PayPal…</span></div>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400">CVV</label>
+                            <div id="card-cvv-field-container" class="paypal-card-field mt-1"><span class="text-slate-400 text-sm">Cargando campo seguro de PayPal…</span></div>
+                        </div>
                     </div>
                 </div>
-
-                <button type="submit" id="paySubmitBtn" class="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition text-sm uppercase tracking-wider mt-2 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-lock"></i> Pagar con Tarjeta Directa
+                <button id="cardPaymentSubmit" type="button" class="w-full mt-4 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl transition">
+                    Pagar con tarjeta
                 </button>
-            </form>
+                <div id="cardPaymentMessage" class="text-xs text-slate-400 text-center mt-3"></div>
+            </div>
+
+            <div id="cardEligibilityMessage" class="hidden text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 mb-5"></div>
 
             <div class="relative flex py-2 items-center mb-4">
                 <div class="flex-grow border-t border-slate-800"></div>
@@ -488,7 +674,7 @@
             <div id="paypalButtonContainer" class="z-10 min-h-[45px]"></div>
 
             <p class="text-[11px] text-slate-500 text-center mt-4">
-                <i class="fa-solid fa-shield-halved text-emerald-400"></i> Procesado de forma 100% segura por PayPal Business. Los fondos van directamente a tu cuenta.
+                <i class="fa-solid fa-shield-halved text-emerald-400"></i> Procesado mediante PayPal Business (App MEOWCOIN). La disponibilidad de tarjeta depende de la elegibilidad de PayPal.
             </p>
         </div>
     </div>
@@ -507,6 +693,7 @@
         let state = {
             isLoggedIn: false,
             currentUser: null,
+            userId: null,
             balance: 0.0,
             baseSpeed: 25 / (30 * 24 * 60 * 60), // 25 $MEOW cada 30 días
             catMiners: 0,
@@ -516,25 +703,92 @@
             miningInterval: null,
             miningActive: false,
             lastMiningTimestamp: Date.now(),
+            lastServerSyncTimestamp: 0,
             referralCode: null,
             referredBy: null,
             referralCount: 0,
             firstSpeedPurchaseDiscountEligible: false,
             activePaymentItem: null,
-            musicEnabled: false,
-            audioContext: null
+            musicEnabled: localStorage.getItem('meow_music_enabled') === '1',
+            audioContext: null,
+            solanaWalletAddress: null,
+            solanaWalletProvider: null,
+            solanaConnection: null,
+            lastMeowUsdtQuote: null,
+            onchainMeowBalance: 0,
+            paypalSdkPromise: null,
+            paypalCardField: null,
+            paypalRendering: false
+            
         };
+
+        // =========================
+        // Solana / $MEOW configuration
+        // =========================
+        const SOLANA_RPC_URL = 'https://api.mainnet.solana.com';
+        // Paste the real $MEOW mint address here after creating the token on Solana.
+        // Leave empty until the official mint exists so the app never shows a fake on-chain balance.
+        const MEOW_MINT_ADDRESS = '';
+        // Official Tether USD₮ mint on Solana.
+        const USDT_MINT_ADDRESS = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+        const JUPITER_QUOTE_URL = 'https://lite-api.jup.ag/swap/v1/quote';
+        const JUPITER_SWAP_URL = 'https://lite-api.jup.ag/swap/v1/swap';
+        const DEFAULT_SWAP_SLIPPAGE_BPS = 50;
+
+        // =========================
+        // Supabase / authentication
+        // =========================
+        const SUPABASE_URL = 'https://ykxdqojgqldxnwpmrawr.supabase.co';
+        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_qIwkN7CJgoYyxaSXTEcHvQ_Bp2DuppU';
+        const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
         // DOM Loaded Initialization
-        window.onload = function() {
+        window.onload = async function() {
             captureReferral();
-            checkExistingSession();
-            restorePendingPayment();
+            initSolanaConnection();
             updateMiningButton();
+            updateWalletUI();
+            updateWithdrawalNetworkUI();
             startMiningLoop();
+
+            db.auth.onAuthStateChange((_event, session) => {
+                setTimeout(() => applySupabaseSession(session), 0);
+            });
+
+            const { data, error } = await db.auth.getSession();
+            if (error) {
+                console.error(error);
+                showNotification('No se pudo comprobar la sesión de Supabase.');
+            }
+            await applySupabaseSession(data?.session || null);
         };
 
-        // Auth Password Visibility Toggle
+        async function applySupabaseSession(session) {
+            if (!session?.user) {
+                state.isLoggedIn = false;
+                state.currentUser = null;
+                state.userId = null;
+                state.miningActive = false;
+                updateUIState();
+                updateMiningButton();
+                return;
+            }
+
+            state.isLoggedIn = true;
+            state.currentUser = session.user.email || session.user.id;
+            state.userId = session.user.id;
+
+            try {
+                await loadUserStateFromDb();
+                updateUIState();
+                updateMiningButton();
+                await restorePendingPayment();
+            } catch (error) {
+                console.error(error);
+                showNotification('La sesión existe, pero no se pudo cargar tu perfil.');
+            }
+        }
+
         function togglePasswordVisibility() {
             const passwordInput = document.getElementById('authPassword');
             const eyeIcon = document.getElementById('passwordEyeIcon');
@@ -549,7 +803,6 @@
             }
         }
 
-        // Toggle Auth Mode (Login vs Register)
         let isRegisterMode = false;
         function toggleAuthMode() {
             isRegisterMode = !isRegisterMode;
@@ -557,8 +810,8 @@
             const subtitle = document.getElementById('authSubtitle');
             const btn = document.getElementById('authSubmitBtn');
             const toggleBtn = document.getElementById('toggleAuthBtn');
-
             const referralField = document.getElementById('referralRegisterField');
+
             if (isRegisterMode) {
                 referralField.classList.remove('hidden');
                 const pendingRef = localStorage.getItem('meow_pending_referrer');
@@ -576,55 +829,75 @@
             }
         }
 
-        // Auth Submit Handler
-        function handleAuthSubmit(e) {
+        async function handleAuthSubmit(e) {
             e.preventDefault();
+
+            const btn = document.getElementById('authSubmitBtn');
             const email = document.getElementById('authEmail').value.trim().toLowerCase();
+            const password = document.getElementById('authPassword').value;
             const referralInput = document.getElementById('authReferralCode');
-            const enteredReferral = isRegisterMode && referralInput ? referralInput.value.trim().toUpperCase() : '';
-            state.isLoggedIn = true;
-            state.currentUser = email;
+            const enteredReferral = isRegisterMode && referralInput
+                ? referralInput.value.trim().toUpperCase()
+                : '';
 
-            localStorage.setItem('meow_user_email', email);
-            sessionStorage.setItem('meow_user_email', email);
-            loadUserState(email);
+            btn.disabled = true;
+            btn.innerText = isRegisterMode ? 'Creando cuenta...' : 'Iniciando sesión...';
 
-            if (isRegisterMode && !localStorage.getItem(userStorageKey(email) + '_registered')) {
-                const referral = enteredReferral || localStorage.getItem('meow_pending_referrer') || '';
-                state.referredBy = referral || null;
-                state.firstSpeedPurchaseDiscountEligible = !!referral;
-                localStorage.setItem(userStorageKey(email) + '_registered', '1');
-                if (referral) {
-                    localStorage.setItem('meow_referral_' + email, referral);
-                    showNotification('Código de referido aplicado: 10% de descuento en tu primera compra de $10.');
+            try {
+                if (isRegisterMode) {
+                    const referral = enteredReferral || localStorage.getItem('meow_pending_referrer') || '';
+
+                    const { data, error } = await db.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            data: {
+                                username: email,
+                                referral_code: referral || null
+                            }
+                        }
+                    });
+
+                    if (error) throw error;
+
+                    localStorage.removeItem('meow_pending_referrer');
+
+                    if (!data.session) {
+                        showNotification('Cuenta creada. Revisa tu correo para confirmar la cuenta antes de iniciar sesión.');
+                        toggleAuthMode();
+                    } else {
+                        await applySupabaseSession(data.session);
+                        showNotification(referral
+                            ? 'Cuenta creada y código de referido registrado.'
+                            : 'Cuenta creada correctamente.');
+                    }
+                } else {
+                    const { data, error } = await db.auth.signInWithPassword({
+                        email,
+                        password
+                    });
+
+                    if (error) throw error;
+                    await applySupabaseSession(data.session);
+                    showNotification('Sesión iniciada correctamente.');
                 }
-                localStorage.removeItem('meow_pending_referrer');
-                saveUserState();
-            }
-            updateUIState();
-            updateMiningButton();
-        }
-
-        // Check Existing Session
-        function checkExistingSession() {
-            const savedEmail = localStorage.getItem('meow_user_email') || sessionStorage.getItem('meow_user_email');
-            if (savedEmail) {
-                state.isLoggedIn = true;
-                state.currentUser = savedEmail;
-                loadUserState(savedEmail);
-                updateUIState();
+            } catch (error) {
+                console.error(error);
+                showNotification(error?.message || 'No se pudo completar la autenticación.');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = isRegisterMode ? 'Registrarse' : 'Iniciar Sesión';
             }
         }
 
-        // Logout
-        function logout() {
-            state.isLoggedIn = false;
-            state.currentUser = null;
-            localStorage.removeItem('meow_user_email');
-            sessionStorage.removeItem('meow_user_email');
-            state.miningActive = false;
-            updateUIState();
-            updateMiningButton();
+        async function logout() {
+            try {
+                await syncMiningWithServer();
+                await db.auth.signOut();
+            } catch (error) {
+                console.error(error);
+                showNotification('No se pudo cerrar la sesión correctamente.');
+            }
         }
 
         // Update UI View based on Auth State
@@ -651,7 +924,9 @@
             }
         }
 
-        // Mining Loop: calcula por tiempo real y no entrega paquetes de golpe.
+        // =========================
+        // Minería: el servidor es la fuente de verdad
+        // =========================
         function getCycleDays() {
             if (state.catMiners >= 2) return 10;
             if (state.catMiners === 1) return 20;
@@ -659,12 +934,10 @@
         }
 
         function getMiningRate() {
-            // La base produce 25 en el ciclo correspondiente.
             const cycleSeconds = getCycleDays() * 24 * 60 * 60;
             const baseRate = 25 / cycleSeconds;
-            // Cada paquete de $10 añade 1,000 $MEOW durante el mismo ciclo.
-            const packageRate = state.speedPackages > 0
-                ? (state.speedPackages * 1000) / cycleSeconds
+            const packageRate = state.speedPackageRemaining > 0
+                ? state.speedPackageRemaining / cycleSeconds
                 : 0;
             return baseRate + packageRate;
         }
@@ -673,23 +946,43 @@
             if (!state.isLoggedIn || !state.miningActive || elapsedSeconds <= 0) return;
 
             const cycleSeconds = getCycleDays() * 24 * 60 * 60;
-            const baseRate = 25 / cycleSeconds;
-            const baseEarned = baseRate * elapsedSeconds;
-            state.balance += baseEarned;
+            const baseEarned = (25 / cycleSeconds) * elapsedSeconds;
+            const packageRate = state.speedPackageRemaining > 0
+                ? state.speedPackageRemaining / cycleSeconds
+                : 0;
+            const packageEarned = Math.min(
+                state.speedPackageRemaining,
+                packageRate * elapsedSeconds
+            );
 
-            // Los paquetes son una cantidad finita: 1,000 por paquete.
-            if (state.speedPackageRemaining > 0) {
-                const packageRate = (state.speedPackageRemaining / cycleSeconds);
-                const packageEarned = Math.min(
-                    state.speedPackageRemaining,
-                    packageRate * elapsedSeconds
-                );
-                state.balance += packageEarned;
-                state.speedPackageRemaining -= packageEarned;
+            state.balance += baseEarned + packageEarned;
+            state.speedPackageRemaining = Math.max(0, state.speedPackageRemaining - packageEarned);
+            renderMiningStats();
+        }
+
+        async function syncMiningWithServer() {
+            if (!state.isLoggedIn || !state.userId) return null;
+
+            const { data, error } = await db.rpc('sync_mining');
+            if (error) {
+                console.error('sync_mining:', error);
+                return null;
             }
 
-            saveUserState();
-            renderMiningStats();
+            if (data) {
+                state.balance = Number(data.balance) || 0;
+                state.catMiners = Number(data.cats) || 0;
+                state.speedPackages = Number(data.speed_packages) || 0;
+                state.speedPackageRemaining = Number(data.speed_meow_remaining) || 0;
+                state.miningActive = !!data.is_mining;
+                state.lastMiningTimestamp = Date.now();
+                state.lastServerSyncTimestamp = Date.now();
+                renderCatMiners();
+                renderMiningStats();
+                updateMiningButton();
+            }
+
+            return data;
         }
 
         function startMiningLoop() {
@@ -703,29 +996,62 @@
                 updateMiningProgress(elapsed);
 
                 if (state.miningActive && Math.random() < 0.1) spawnFloatingToken();
+
+                if (state.isLoggedIn && now - state.lastServerSyncTimestamp >= 15000) {
+                    state.lastServerSyncTimestamp = now;
+                    syncMiningWithServer();
+                }
             }, 1000);
         }
 
         function renderMiningStats() {
             const currentSpeed = getMiningRate();
-            document.getElementById('balanceDisplay').innerText = state.balance.toFixed(4);
-            document.getElementById('speedDisplay').innerText = currentSpeed.toFixed(8);
-            document.getElementById('speedBoostInfo').innerText =
+            const balance = document.getElementById('balanceDisplay');
+            const speed = document.getElementById('speedDisplay');
+            const info = document.getElementById('speedBoostInfo');
+            const cycle = document.getElementById('cycleDaysInfo');
+
+            if (balance) balance.innerText = state.balance.toFixed(4);
+            if (speed) speed.innerText = currentSpeed.toFixed(8);
+            if (info) info.innerText =
                 `${state.speedPackages} paquete(s) de 1,000 en cola • Ciclo actual: ${getCycleDays()} días`;
-            document.getElementById('cycleDaysInfo').innerText = `Ciclo: ${getCycleDays()} Días`;
+            if (cycle) cycle.innerText = `Ciclo: ${getCycleDays()} Días`;
+
+            const walletMiningBalance = document.getElementById('walletMiningBalance');
+            if (walletMiningBalance) walletMiningBalance.innerText = state.balance.toFixed(4);
         }
 
-        // Start / pause mining manually
-        function toggleMining() {
+        async function toggleMining() {
             if (!state.isLoggedIn) {
                 showNotification('Primero inicia sesión para comenzar a minar.');
                 return;
             }
 
-            state.miningActive = !state.miningActive;
-            state.lastMiningTimestamp = Date.now();
-            saveUserState();
-            updateMiningButton();
+            const btn = document.getElementById('startMiningBtn');
+            if (btn) btn.disabled = true;
+
+            try {
+                await syncMiningWithServer();
+                const nextActive = !state.miningActive;
+
+                const { data, error } = await db.rpc('toggle_mining', {
+                    p_active: nextActive
+                });
+
+                if (error) throw error;
+
+                state.miningActive = !!data?.is_mining;
+                state.lastMiningTimestamp = Date.now();
+                updateMiningButton();
+                showNotification(state.miningActive
+                    ? 'Minería iniciada.'
+                    : 'Minería pausada.');
+            } catch (error) {
+                console.error(error);
+                showNotification(error?.message || 'No se pudo cambiar el estado de minería.');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         }
 
         function updateMiningButton() {
@@ -769,10 +1095,16 @@
 
             // Disable button if reached max cats (2)
             const buyCatBtn = document.getElementById('buyCatBtn');
-            if (state.catMiners >= 2) {
-                buyCatBtn.disabled = true;
-                buyCatBtn.className = "w-full py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed";
-                buyCatBtn.innerText = "Límite Máximo Alcanzado (2/2)";
+            if (buyCatBtn) {
+                if (state.catMiners >= 2) {
+                    buyCatBtn.disabled = true;
+                    buyCatBtn.className = "w-full py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed";
+                    buyCatBtn.innerText = "Límite Máximo Alcanzado (2/2)";
+                } else {
+                    buyCatBtn.disabled = false;
+                    buyCatBtn.className = "w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-600/20 transition flex items-center justify-center gap-2";
+                    buyCatBtn.innerHTML = '<i class="fa-solid fa-cat"></i> Comprar Gatito por $50 USD';
+                }
             }
 
             // Re-render miner elements
@@ -797,237 +1129,403 @@
             }
         }
 
-        // Form Input Formatters
-        function formatCardNumber(input) {
-            let value = input.value.replace(/\D/g, '');
-            value = value.replace(/(.{4})/g, '$1 ').trim();
-            input.value = value;
+        // Raw card data is intentionally NOT collected by this app.
+        // Card-capable checkout is handled by PayPal's hosted checkout.
+
+        async function ensurePayPalSdk() {
+            // Use the public PayPal Client ID directly. Card Fields remain PayPal-hosted.
+            // This removes the client-token Edge Function from the browser-side SDK load.
+            if (window.paypal?.Buttons && window.paypal?.CardFields) return window.paypal;
+            if (state.paypalSdkPromise) return state.paypalSdkPromise;
+
+            state.paypalSdkPromise = (async () => {
+                const clientId = 'AYZn3ITuCyYxxj5nALNp8-2uCxyX_5fYvszY7nBCp4ax9lxhDqfSy5XHpGuQh0CTO0W8JM8qS3gZCUvy';
+
+                await new Promise((resolve, reject) => {
+                    const existing = document.getElementById('paypal-js-sdk');
+                    if (existing) {
+                        if (window.paypal?.Buttons && window.paypal?.CardFields) return resolve();
+                        const timer = setTimeout(() => reject(new Error('No se pudo cargar el checkout de PayPal.')), 15000);
+                        existing.addEventListener('load', () => {
+                            clearTimeout(timer);
+                            if (window.paypal?.Buttons && window.paypal?.CardFields) resolve();
+                            else reject(new Error('PayPal no habilitó el pago con tarjeta en esta aplicación.'));
+                        }, { once: true });
+                        existing.addEventListener('error', () => {
+                            clearTimeout(timer);
+                            reject(new Error('No se pudo cargar PayPal.'));
+                        }, { once: true });
+                        return;
+                    }
+
+                    const script = document.createElement('script');
+                    script.id = 'paypal-js-sdk';
+                    script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=USD&intent=capture&components=buttons,card-fields`;
+                    script.async = true;
+
+                    const timer = setTimeout(() => reject(new Error('PayPal tardó demasiado en cargar.')), 15000);
+                    script.onload = () => {
+                        clearTimeout(timer);
+                        if (window.paypal?.Buttons && window.paypal?.CardFields) resolve();
+                        else reject(new Error('PayPal no habilitó el pago con tarjeta en esta aplicación.'));
+                    };
+                    script.onerror = () => {
+                        clearTimeout(timer);
+                        reject(new Error('No se pudo cargar PayPal.'));
+                    };
+                    document.head.appendChild(script);
+                });
+
+                return window.paypal;
+            })().catch(error => {
+                state.paypalSdkPromise = null;
+                throw error;
+            });
+
+            return state.paypalSdkPromise;
         }
 
-        function formatExpiry(input) {
-            let value = input.value.replace(/\D/g, '');
-            if (value.length >= 2) {
-                value = value.substring(0, 2) + '/' + value.substring(2, 4);
+        function resetCardFields() {
+            state.paypalCardField = null;
+            const ids = [
+                'card-name-field-container',
+                'card-number-field-container',
+                'card-expiry-field-container',
+                'card-cvv-field-container'
+            ];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = '';
+            });
+            const section = document.getElementById('cardPaymentSection');
+            const message = document.getElementById('cardPaymentMessage');
+            if (section) section.classList.remove('hidden');
+            if (message) message.innerText = '';
+        }
+
+        async function renderPayPalCheckout(amount) {
+            const container = document.getElementById('paypalButtonContainer');
+            const cardSection = document.getElementById('cardPaymentSection');
+            const eligibilityMessage = document.getElementById('cardEligibilityMessage');
+            const cardMessage = document.getElementById('cardPaymentMessage');
+            const submit = document.getElementById('cardPaymentSubmit');
+            if (!container) return;
+            if (state.paypalRendering) return;
+            state.paypalRendering = true;
+
+            container.innerHTML = '<div class="text-sm text-slate-400 text-center py-3">Cargando checkout seguro…</div>';
+            resetCardFields();
+            if (cardMessage) cardMessage.innerText = '';
+            if (submit) submit.disabled = true;
+            if (eligibilityMessage) {
+                eligibilityMessage.classList.add('hidden');
+                eligibilityMessage.innerText = '';
             }
-            input.value = value;
+
+            try {
+                const paypalSdk = await ensurePayPalSdk();
+                const createOrder = async (paymentMethod = 'paypal') => { 
+                    console.log('[PayPal] createOrder START:', paymentMethod);
+                    if (!state.activePaymentItem?.purchaseId) {
+                        throw new Error('No existe una orden de compra pendiente.');
+                    }
+                    const { data, error } = await db.functions.invoke('paypal-sandbox-create-order', {
+                        body: {
+                            purchase_id: state.activePaymentItem.purchaseId,
+                            payment_method: paymentMethod
+                        }
+                    });
+
+                    console.log('[PayPal] createOrder RESPONSE:', {
+                       ok: !error,
+                       hasOrderId: !!data?.order_id,
+                       error: error?.message || null 
+
+                    });
+
+                    if (error) throw error;
+                    if (!data?.order_id) throw new Error(data?.message || 'PayPal no devolvió un ID de orden.');
+                    return data.order_id;
+                };
+
+                window.testPayPalCardOrder = () => createOrder('card');
+
+                const onApprove = async (data) => {
+                    try {
+                        const {
+                            data: { session },
+                            error: sessionError
+                        } = await db.auth.getSession();
+
+                        console.log('[PayPal] Auth session before capture:', {
+                            hasSession: !!session,
+                            hasAccessToken: !!session?.access_token,
+                            sessionError: sessionError?.message || null
+                        });
+
+                        if (sessionError) {
+                            throw new Error(
+                                `No se pudo obtener la sesión de Supabase: ${sessionError.message}`
+                            );
+                        }
+
+                        if (!session?.access_token) {
+                            throw new Error(
+                                'No existe una sesión de Supabase válida. Inicia sesión nuevamente antes de pagar.'
+                            );
+                        }
+
+                        const { data: result, error } = await db.functions.invoke(
+                            'paypal-sandbox-capture-order',
+                            {
+                                headers: {
+                                    Authorization: `Bearer ${session.access_token}`
+                                },
+                                body: {
+                                    purchase_id: state.activePaymentItem?.purchaseId,
+                                    order_id: data.orderID
+                                }
+                            }
+                        );
+
+                        console.log('[PayPal] capture RESPONSE:', {
+                            ok: !error,
+                            paid: result?.paid ?? false,
+                            error: error?.message || null,
+                            message: result?.message || null,
+                            paypal_http_status: result?.paypal_http_status ?? null,
+                            paypal_issue: result?.paypal_issue ?? null,
+                            paypal_debug_id: result?.paypal_debug_id ?? null
+                        });
+
+                        if (error) throw error;
+                        if (!result?.paid) {
+                            throw new Error(
+                                result?.message || 'El pago no fue confirmado.'
+                            );
+                        }
+
+                        // La Edge Function ya ejecutó complete_purchase en Supabase.
+                        // No cerramos/re-renderizamos el modal mientras PayPal Card Fields
+                        // todavía está resolviendo onApprove, porque eso puede provocar
+                        // "Window closed or abort before response" aunque el pago ya haya sido capturado.
+                        setTimeout(() => {
+                            completePurchase().catch(error => {
+                                console.error('Post-payment UI refresh:', error);
+                            });
+                        }, 0);
+                    } catch (error) {
+                        console.error('PayPal capture:', error);
+                        showNotification(
+                            error?.message ||
+                            'El pago fue aprobado, pero no pudo verificarse todavía.'
+                        );
+                        if (submit) submit.disabled = false;
+                    }
+                };
+                container.innerHTML = '';
+                await paypalSdk.Buttons({
+                    style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'pay' },
+                    createOrder: () => createOrder('paypal'),
+                    onApprove,
+                    onCancel: () => showNotification('El pago fue cancelado. Tu orden queda pendiente.'),
+                    onError: error => {
+                        console.error('PayPal:', error);
+                        showNotification(error?.message || 'PayPal no pudo iniciar el checkout.');
+                    }
+                }).render('#paypalButtonContainer');
+
+                if (!paypalSdk.CardFields) {
+                    throw new Error('PayPal cargó, pero no habilitó Card Fields para esta aplicación.');
+                }
+
+                const cardField = paypalSdk.CardFields({
+                    createOrder: () => createOrder('card'),
+                    onApprove,
+                    onCancel: () => {
+                        if (cardMessage) cardMessage.innerText = 'Pago cancelado. Puedes volver a intentarlo.';
+                        if (submit) submit.disabled = false;
+                    },
+                    onError: error => {
+                        console.error('PayPal CardFields:', error);
+                        if (cardMessage) {
+                            cardMessage.innerText = error?.message || 'PayPal no pudo procesar la tarjeta. Revisa los datos e inténtalo nuevamente.';
+                        }
+                        if (submit) submit.disabled = false;
+                    },
+                    style: {
+                        input: {
+                            'font-size': '16px',
+                            'font-family': 'Inter, Arial, sans-serif',
+                            'font-weight': '500',
+                            color: '#f8fafc',
+                            background: '#020617',
+                            'caret-color': '#f59e0b'
+                        },
+                        '.invalid': { color: '#dc2626' }
+                    }
+                });
+
+                if (!cardField.isEligible()) {
+                    if (cardSection) cardSection.classList.add('hidden');
+                    if (eligibilityMessage) {
+                        eligibilityMessage.innerText = 'PayPal no habilitó el pago directo con tarjeta para esta sesión. El botón de PayPal sigue disponible. En Sandbox, verifica que Advanced Credit and Debit Card Payments esté habilitado en la App MEOWCOIN.';
+                        eligibilityMessage.classList.remove('hidden');
+                    }
+                    return;
+                }
+
+                if (cardSection) cardSection.classList.remove('hidden');
+                state.paypalCardField = cardField;
+
+                // Render each PayPal-hosted iframe and wait for it to finish before enabling Pay.
+                await Promise.all([
+                    cardField.NameField({ placeholder: 'Nombre del titular' }).render('#card-name-field-container'),
+                    cardField.NumberField({ placeholder: 'Número de tarjeta' }).render('#card-number-field-container'),
+                    cardField.ExpiryField({ placeholder: 'MM/YY' }).render('#card-expiry-field-container'),
+                    cardField.CVVField({ placeholder: 'CVV' }).render('#card-cvv-field-container')
+                ]);
+
+                if (submit) {
+                    submit.disabled = false;
+                    submit.onclick = async () => {
+                        submit.disabled = true;
+                        if (cardMessage) cardMessage.innerText = 'Procesando pago seguro…';
+                        try {
+                            await cardField.submit();
+                        } catch (error) {
+                            console.error('PayPal CardFields submit:', error);
+                            if (cardMessage) {
+                                cardMessage.innerText = error?.message || 'Revisa los datos de la tarjeta e inténtalo nuevamente.';
+                            }
+                            submit.disabled = false;
+                        }
+                    };
+                }
+            } catch (error) {
+                console.error('PayPal checkout initialization:', error);
+                state.paypalRendering = false;
+                if (cardSection) cardSection.classList.add('hidden');
+                if (eligibilityMessage) {
+                    eligibilityMessage.innerText = 'El pago con tarjeta de PayPal no está disponible en este momento. Puedes intentar nuevamente o usar el botón de PayPal.';
+                    eligibilityMessage.classList.remove('hidden');
+                }
+            }
         }
 
-        // Open Payment Modal
-        function openPaymentModal(type, amount, name) {
-            if (!state.isLoggedIn) {
+        async function openPaymentModal(type, amount, name) {
+            if (!state.isLoggedIn || !state.userId) {
                 showNotification('Primero inicia sesión para comprar un paquete.');
                 return;
             }
 
-            const eligibleDiscount = type === 'speed' && amount === 10 && state.firstSpeedPurchaseDiscountEligible;
-            const finalAmount = eligibleDiscount ? 9 : amount;
-            state.activePaymentItem = { type, amount, originalAmount: amount, finalAmount, name, discountApplied: eligibleDiscount };
-            localStorage.setItem('meow_pending_payment', JSON.stringify(state.activePaymentItem));
-            localStorage.setItem('meow_payment_user', state.currentUser || '');
+            if (type === 'cat' && state.catMiners >= 2) {
+                showNotification('Ya alcanzaste el máximo de 2 gatitos.');
+                return;
+            }
 
-            document.getElementById('modalItemTitle').innerText = name;
-            document.getElementById('modalItemPrice').innerHTML = eligibleDiscount
-                ? `<span class="line-through text-slate-500 text-xl mr-2">$10.00</span><span class="text-emerald-400">$9.00 USD</span><div class="text-xs text-emerald-400 mt-1">10% de descuento por referido aplicado</div>`
-                : `$${amount.toFixed(2)} USD`;
-            document.getElementById('paymentModal').classList.remove('hidden');
+            try {
+                const { data, error } = await db.rpc('create_purchase_intent', {
+                    p_product_type: type
+                });
 
-            renderPayPalButtons(finalAmount);
-        }
+                if (error) throw error;
+                if (!data?.purchase_id) throw new Error('No se pudo crear la orden de compra.');
 
-        // Close Payment Modal
-        function closePaymentModal(clearPending = true) {
-            document.getElementById('paymentModal').classList.add('hidden');
-            document.getElementById('paypalButtonContainer').innerHTML = '';
-            if (clearPending) {
-                localStorage.removeItem('meow_pending_payment');
-                localStorage.removeItem('meow_payment_user');
+                const finalAmount = Number(data.amount_usd);
+                state.activePaymentItem = {
+                    type,
+                    amount,
+                    originalAmount: Number(data.original_amount_usd ?? amount),
+                    finalAmount,
+                    name: data.product_name || name,
+                    discountApplied: !!data.discount_applied,
+                    purchaseId: data.purchase_id
+                };
+
+                localStorage.setItem('meow_pending_payment', JSON.stringify(state.activePaymentItem));
+
+                document.getElementById('modalItemTitle').innerText = state.activePaymentItem.name;
+                document.getElementById('modalItemPrice').innerHTML = state.activePaymentItem.discountApplied
+                    ? `<span class="line-through text-slate-500 text-xl mr-2">$${Number(state.activePaymentItem.originalAmount).toFixed(2)}</span><span class="text-emerald-400">$${finalAmount.toFixed(2)} USD</span><div class="text-xs text-emerald-400 mt-1">10% de descuento por referido aplicado</div>`
+                    : `$${finalAmount.toFixed(2)} USD`;
+
+                document.getElementById('paymentModal').classList.remove('hidden');
+                renderPayPalCheckout(finalAmount);
+            } catch (error) {
+                console.error(error);
+                showNotification(error?.message || 'No se pudo preparar la compra.');
             }
         }
 
-        // Restores a purchase if PayPal caused the page to reload/return.
-        function restorePendingPayment() {
+        function closePaymentModal(clearPending = true) {
+            document.getElementById('paymentModal').classList.add('hidden');
+            const container = document.getElementById('paypalButtonContainer');
+            if (container) container.innerHTML = '';
+            resetCardFields();
+            state.paypalRendering = false;
+
+            if (clearPending) {
+                localStorage.removeItem('meow_pending_payment');
+                state.activePaymentItem = null;
+            }
+        }
+
+        async function restorePendingPayment() {
             const savedPayment = localStorage.getItem('meow_pending_payment');
-            const savedUser = localStorage.getItem('meow_payment_user');
             if (!savedPayment || !state.isLoggedIn) return;
 
             try {
                 const item = JSON.parse(savedPayment);
-                if (!item || !item.type || !item.amount || !item.name) return;
-                if (savedUser && state.currentUser && savedUser !== state.currentUser) return;
+                if (!item?.purchaseId) return;
 
-                state.activePaymentItem = item;
-                const finalAmount = Number(item.finalAmount ?? item.amount);
-                document.getElementById('modalItemTitle').innerText = item.name;
-                document.getElementById('modalItemPrice').innerHTML = item.discountApplied
-                    ? `<span class="line-through text-slate-500 text-xl mr-2">$10.00</span><span class="text-emerald-400">$${finalAmount.toFixed(2)} USD</span><div class="text-xs text-emerald-400 mt-1">10% de descuento por referido aplicado</div>`
-                    : `$${finalAmount.toFixed(2)} USD`;
+                const { data, error } = await db
+                    .from('purchases')
+                    .select('id, product_type, amount_usd, status')
+                    .eq('id', item.purchaseId)
+                    .eq('user_id', state.userId)
+                    .maybeSingle();
+
+                if (error) throw error;
+
+                if (!data || ['paid', 'completed'].includes(data.status)) {
+                    localStorage.removeItem('meow_pending_payment');
+                    return;
+                }
+
+                if (data.status !== 'pending') return;
+
+                state.activePaymentItem = {
+                    ...item,
+                    finalAmount: Number(data.amount_usd),
+                    purchaseId: data.id
+                };
+
+                document.getElementById('modalItemTitle').innerText = item.name || 'Compra $MEOW';
+                document.getElementById('modalItemPrice').innerText = `$${Number(data.amount_usd).toFixed(2)} USD`;
+                document.getElementById('paymentModal').classList.remove('hidden');
+                renderPayPalCheckout(Number(data.amount_usd));
             } catch (error) {
-                localStorage.removeItem('meow_pending_payment');
-                localStorage.removeItem('meow_payment_user');
+                console.error(error);
             }
         }
 
-        // Direct Card Payment Submission
-        function processCardPayment(e) {
-            e.preventDefault();
-            const btn = document.getElementById('paySubmitBtn');
-            btn.disabled = true;
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Procesando Pago...`;
-
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.innerHTML = `<i class="fa-solid fa-lock"></i> Pagar con Tarjeta Directa`;
-                completePurchase();
-            }, 1500);
-        }
-
-        // Render Official PayPal Button
-        function renderPayPalButtons(amount) {
-            const container = document.getElementById('paypalButtonContainer');
-            container.innerHTML = '';
-
-            // Persist the payment before PayPal opens its approval window.
-            if (state.activePaymentItem) {
-                localStorage.setItem('meow_pending_payment', JSON.stringify(state.activePaymentItem));
-                localStorage.setItem('meow_payment_user', state.currentUser || '');
-            }
-
-            if (typeof paypal !== 'undefined') {
-                paypal.Buttons({
-                    style: {
-                        layout: 'vertical',
-                        color: 'gold',
-                        shape: 'rect',
-                        label: 'pay'
-                    },
-                    createOrder: function(data, actions) {
-                        return actions.order.create({
-                            purchase_units: [{
-                                amount: {
-                                    value: amount.toString()
-                                },
-                                description: state.activePaymentItem.name
-                            }]
-                        });
-                    },
-                    onApprove: function(data, actions) {
-                        return actions.order.capture().then(function(details) {
-                            // Restore the logged-in user before applying the purchase.
-                            const savedEmail = localStorage.getItem('meow_user_email') || sessionStorage.getItem('meow_user_email');
-                            if (savedEmail) {
-                                state.isLoggedIn = true;
-                                state.currentUser = savedEmail;
-                            }
-
-                            updateUIState();
-                            completePurchase();
-                        });
-                    },
-                    onCancel: function() {
-                        showNotification('El pago fue cancelado. Tu paquete no fue activado.');
-                    },
-                    onError: function(err) {
-                        console.warn('PayPal Client Error or Fallback engaged:', err);
-                    }
-                }).render('#paypalButtonContainer');
-            }
-        }
-
-        // Complete Purchase and Activate Boosts
-        function completePurchase() {
-            const item = state.activePaymentItem;
-            if (!item) return;
-
-            if (item.type === 'speed') {
-                state.speedPackages += 1;
-                state.speedPackageRemaining += 1000;
-                if (item.discountApplied) {
-                    state.firstSpeedPurchaseDiscountEligible = false;
-                }
-                showNotification(`Paquete activado: 1,000 $MEOW se distribuirán durante ${getCycleDays()} días.`);
-            } else if (item.type === 'cat') {
-                if (state.catMiners < 2) {
-                    state.catMiners += 1;
-                    renderCatMiners();
-                }
-            }
-
-            saveUserState();
+        async function completePurchase() {
+            await loadUserStateFromDb();
             renderMiningStats();
-            closePaymentModal(true);
+            renderCatMiners();
             updateUIState();
             updateMiningButton();
-            showNotification(`¡Pago Exitoso! Has activado: ${item.name}`);
+            closePaymentModal(true);
+            showNotification('¡Pago confirmado! Tu compra ya está activa.');
         }
-
 
         // =========================
-        // Datos locales, referidos y navegación
+        // Datos de usuario: Supabase
         // =========================
-        function userStorageKey(email) {
-            return `meow_user_state_${btoa(unescape(encodeURIComponent(email))).replace(/[^a-zA-Z0-9]/g, '')}`;
-        }
-
-        function generateReferralCode() {
-            return 'MEOW-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-        }
-
-        function loadUserState(email) {
-            const key = userStorageKey(email);
-            const saved = localStorage.getItem(key);
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    state.balance = Number(data.balance) || 0;
-                    state.catMiners = Number(data.catMiners) || 0;
-                    state.speedPackages = Number(data.speedPackages) || 0;
-                    state.speedPackageRemaining = Number(data.speedPackageRemaining) || state.speedPackages * 1000;
-                    state.miningActive = Boolean(data.miningActive);
-                    state.lastMiningTimestamp = Number(data.lastMiningTimestamp) || Date.now();
-                    state.referralCode = data.referralCode || generateReferralCode();
-                    state.referredBy = data.referredBy || null;
-                    state.referralCount = Number(data.referralCount) || 0;
-                    state.firstSpeedPurchaseDiscountEligible = Boolean(data.firstSpeedPurchaseDiscountEligible);
-                    state.musicEnabled = Boolean(data.musicEnabled);
-                } catch (e) {}
-            } else {
-                state.balance = 0;
-                state.catMiners = 0;
-                state.speedPackages = 0;
-                state.speedPackageRemaining = 0;
-                state.miningActive = false;
-                state.lastMiningTimestamp = Date.now();
-                state.referralCode = generateReferralCode();
-                state.referredBy = localStorage.getItem('meow_pending_referrer') || null;
-                state.referralCount = 0;
-                state.firstSpeedPurchaseDiscountEligible = false;
-                state.musicEnabled = false;
-            }
-            saveUserState();
-            renderCatMiners();
-            renderMiningStats();
-        }
-
-        function saveUserState() {
-            if (!state.currentUser) return;
-            localStorage.setItem(userStorageKey(state.currentUser), JSON.stringify({
-                balance: state.balance,
-                catMiners: state.catMiners,
-                speedPackages: state.speedPackages,
-                speedPackageRemaining: state.speedPackageRemaining,
-                miningActive: state.miningActive,
-                lastMiningTimestamp: Date.now(),
-                referralCode: state.referralCode || generateReferralCode(),
-                referredBy: state.referredBy || null,
-                referralCount: state.referralCount || 0,
-                firstSpeedPurchaseDiscountEligible: !!state.firstSpeedPurchaseDiscountEligible,
-                musicEnabled: !!state.musicEnabled
-            }));
-        }
-
         function captureReferral() {
             const ref = new URLSearchParams(window.location.search).get('ref');
-            if (ref) localStorage.setItem('meow_pending_referrer', ref);
+            if (ref) localStorage.setItem('meow_pending_referrer', ref.toUpperCase());
         }
 
         function getReferralLink() {
@@ -1035,22 +1533,75 @@
             return `${base}?ref=${encodeURIComponent(state.referralCode || '')}`;
         }
 
+        async function loadUserStateFromDb() {
+            if (!state.userId) return;
+
+            await syncMiningWithServer();
+
+            const { data: profile, error: profileError } = await db
+                .from('profiles')
+                .select('id, username, referral_code, referred_by, meow_balance')
+                .eq('id', state.userId)
+                .single();
+
+            if (profileError) throw profileError;
+
+            const { data: mining, error: miningError } = await db
+                .from('mining')
+                .select('is_mining, mining_started_at, last_mining_update, cats, speed_packages, speed_meow_remaining')
+                .eq('user_id', state.userId)
+                .single();
+
+            if (miningError) throw miningError;
+
+            const { count: referralCount, error: referralError } = await db
+                .from('referrals')
+                .select('id', { count: 'exact', head: true })
+                .eq('referrer_id', state.userId);
+
+            if (referralError) throw referralError;
+
+            state.balance = Number(profile.meow_balance) || 0;
+            state.catMiners = Number(mining.cats) || 0;
+            state.speedPackages = Number(mining.speed_packages) || 0;
+            state.speedPackageRemaining = Number(mining.speed_meow_remaining) || 0;
+            state.miningActive = !!mining.is_mining;
+            state.lastMiningTimestamp = Date.now();
+            state.referralCode = profile.referral_code;
+            state.referredBy = profile.referred_by ? 'registrado' : null;
+            state.referralCount = referralCount || 0;
+
+            renderCatMiners();
+            renderMiningStats();
+        }
+
+        function saveUserState() {
+            // Balances/mining state are NOT trusted in localStorage.
+            localStorage.setItem('meow_music_enabled', state.musicEnabled ? '1' : '0');
+        }
+
         function updateProfileAndReferralUI() {
             const link = document.getElementById('referralLink');
             if (link) link.value = getReferralLink();
+
             const code = document.getElementById('referralCodeDisplay');
             if (code) code.innerText = state.referralCode || '---';
+
             const count = document.getElementById('referralCountDisplay');
             if (count) count.innerText = state.referralCount || 0;
+
             const email = document.getElementById('profileEmail');
             if (email) email.innerText = state.currentUser || '---';
+
             const cats = document.getElementById('profileCats');
             if (cats) cats.innerText = `${state.catMiners}/2`;
+
             const packages = document.getElementById('profilePackages');
             if (packages) packages.innerText = state.speedPackages;
+
             const notice = document.getElementById('referralNotice');
             if (notice) notice.innerText = state.referredBy
-                ? `Te registraste mediante el código de referido: ${state.referredBy}`
+                ? 'Tu cuenta tiene un referido registrado.'
                 : 'Comparte tu enlace para invitar a otras personas.';
         }
 
@@ -1058,11 +1609,13 @@
             if (!state.isLoggedIn) return;
             const extra = document.getElementById('appExtraPanels');
             const dashboard = document.getElementById('dashboardSection');
+
             document.querySelectorAll('.app-panel').forEach(p => p.classList.add('hidden'));
             document.querySelectorAll('.app-tab').forEach(b => {
                 b.classList.remove('text-amber-400');
                 b.classList.add('text-slate-400');
             });
+
             const activeBtn = document.querySelector(`[data-tab="${tab}"]`);
             if (activeBtn) {
                 activeBtn.classList.remove('text-slate-400');
@@ -1091,6 +1644,341 @@
                 document.execCommand('copy');
                 showNotification('Enlace de referido copiado.');
             }
+        }
+
+        // =========================
+        // Solana Wallet + MEOW/USDT
+        // =========================
+        function initSolanaConnection() {
+            if (typeof solanaWeb3 !== 'undefined') {
+                state.solanaConnection = new solanaWeb3.Connection(SOLANA_RPC_URL, 'confirmed');
+            }
+            updateWalletUI();
+        }
+
+        function getSolanaProvider() {
+            if (window.phantom && window.phantom.solana) return window.phantom.solana;
+            if (window.solana && window.solana.isPhantom) return window.solana;
+            if (window.solana) return window.solana;
+            return null;
+        }
+
+        function shortWalletAddress(address) {
+            if (!address) return 'No conectada';
+            return `${address.slice(0, 6)}...${address.slice(-6)}`;
+        }
+
+        async function connectSolanaWallet() {
+            try {
+                const provider = getSolanaProvider();
+                if (!provider) {
+                    showNotification('No se encontró una wallet de Solana compatible en este navegador.');
+                    return;
+                }
+                if (!state.solanaConnection && typeof solanaWeb3 !== 'undefined') initSolanaConnection();
+                const response = await provider.connect();
+                state.solanaWalletProvider = provider;
+                state.solanaWalletAddress = response.publicKey.toString();
+                updateWalletUI();
+                await refreshWalletBalances();
+                showNotification(`Wallet conectada: ${shortWalletAddress(state.solanaWalletAddress)}`);
+            } catch (error) {
+                console.error(error);
+                showNotification('No se pudo conectar la wallet de Solana.');
+            }
+        }
+
+        async function disconnectSolanaWallet() {
+            try {
+                if (state.solanaWalletProvider && state.solanaWalletProvider.disconnect) {
+                    await state.solanaWalletProvider.disconnect();
+                }
+            } catch (error) {}
+            state.solanaWalletAddress = null;
+            state.solanaWalletProvider = null;
+            state.lastMeowUsdtQuote = null;
+            state.onchainMeowBalance = 0;
+            updateWalletUI();
+        }
+
+        async function refreshWalletBalances() {
+            if (!state.solanaWalletAddress) {
+                updateWalletUI();
+                return;
+            }
+            if (!state.solanaConnection && typeof solanaWeb3 !== 'undefined') initSolanaConnection();
+            if (!state.solanaConnection || typeof solanaWeb3 === 'undefined') return;
+
+            try {
+                const owner = new solanaWeb3.PublicKey(state.solanaWalletAddress);
+                const tokenPrograms = [
+                    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+                    'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+                ];
+                const accountResults = await Promise.all(tokenPrograms.map(programId =>
+                    state.solanaConnection.getParsedTokenAccountsByOwner(owner, { programId: new solanaWeb3.PublicKey(programId) })
+                ));
+
+                let usdtBalance = 0;
+                let meowBalance = 0;
+                for (const parsedAccounts of accountResults) {
+                    for (const item of parsedAccounts.value) {
+                        const info = item.account.data.parsed?.info;
+                        if (!info) continue;
+                        const mint = info.mint;
+                        const amount = Number(info.tokenAmount?.uiAmount || 0);
+                        if (mint === USDT_MINT_ADDRESS) usdtBalance += amount;
+                        if (MEOW_MINT_ADDRESS && mint === MEOW_MINT_ADDRESS) meowBalance += amount;
+                    }
+                }
+                state.onchainMeowBalance = MEOW_MINT_ADDRESS ? meowBalance : 0;
+
+                const solLamports = await state.solanaConnection.getBalance(owner, 'confirmed');
+                document.getElementById('walletUsdtBalance').innerText = usdtBalance.toFixed(4);
+                document.getElementById('walletMiningBalance').innerText = state.balance.toFixed(4);
+                document.getElementById('swapMeowAvailable').innerText = state.onchainMeowBalance.toFixed(4);
+
+                if (MEOW_MINT_ADDRESS) {
+                    document.getElementById('walletMeowBalance').innerText = state.onchainMeowBalance.toFixed(4);
+                } else {
+                    document.getElementById('walletMeowBalance').innerText = 'Pendiente';
+                }
+
+                updateSwapControls();
+                const solEl = document.getElementById('walletSolBalance');
+                if (solEl) solEl.innerText = `${(solLamports / 1e9).toFixed(4)} SOL`;
+            } catch (error) {
+                console.error(error);
+                showNotification('No se pudieron actualizar los saldos de Solana.');
+            }
+        }
+
+        function updateWalletUI() {
+            const addressEl = document.getElementById('solanaWalletAddress');
+            const connectBtn = document.getElementById('connectWalletBtn');
+            if (!addressEl || !connectBtn) return;
+
+            if (state.solanaWalletAddress) {
+                addressEl.innerHTML = `${shortWalletAddress(state.solanaWalletAddress)} <span class="text-slate-600">(${state.solanaWalletAddress})</span>`;
+                connectBtn.innerText = 'Desconectar';
+                connectBtn.onclick = disconnectSolanaWallet;
+                connectBtn.className = 'shrink-0 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs';
+            } else {
+                addressEl.innerText = 'No conectada';
+                connectBtn.innerText = 'Conectar';
+                connectBtn.onclick = connectSolanaWallet;
+                connectBtn.className = 'shrink-0 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs';
+            }
+
+            const mining = document.getElementById('walletMiningBalance');
+            const available = document.getElementById('swapMeowAvailable');
+            if (mining) mining.innerText = state.balance.toFixed(4);
+            if (available) available.innerText = state.onchainMeowBalance.toFixed(4);
+            updateSwapControls();
+        }
+
+        function getWithdrawalNetworkLabel(network) {
+            const labels = {
+                ethereum: 'Ethereum (ERC-20)',
+                tron: 'Tron (TRC-20)',
+                solana: 'Solana (SPL)'
+            };
+            return labels[network] || 'Red desconocida';
+        }
+
+        function isValidWithdrawalAddress(network, address) {
+            const value = String(address || '').trim();
+            if (network === 'ethereum') return /^0x[a-fA-F0-9]{40}$/.test(value);
+            if (network === 'tron') return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value);
+            if (network === 'solana') return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+            return false;
+        }
+
+        function updateWithdrawalNetworkUI() {
+            const network = document.getElementById('withdrawalNetwork')?.value || 'ethereum';
+            const hint = document.getElementById('withdrawalNetworkHint');
+            const reviewNetwork = document.getElementById('reviewNetwork');
+            const address = document.getElementById('withdrawalAddress');
+            const hints = {
+                ethereum: 'Copia desde tu wallet o exchange la dirección de depósito de USDT en Ethereum (ERC-20). Normalmente empieza con 0x.',
+                tron: 'Copia desde tu wallet o exchange la dirección de depósito de USDT en Tron (TRC-20). Normalmente empieza con T.',
+                solana: 'Copia desde tu wallet o exchange la dirección de depósito de USDT en Solana (SPL).'
+            };
+            if (hint) hint.innerText = hints[network];
+            if (reviewNetwork) reviewNetwork.innerText = getWithdrawalNetworkLabel(network);
+            if (address) {
+                address.placeholder = network === 'ethereum'
+                    ? 'Ejemplo de formato: 0x...'
+                    : network === 'tron'
+                        ? 'Ejemplo de formato: T...'
+                        : 'Pega aquí tu dirección pública de Solana';
+            }
+            updateWithdrawalControls();
+        }
+
+        function fillMaxMeowAmount() {
+            const input = document.getElementById('swapMeowAmount');
+            if (!input) return;
+            input.value = Number(state.onchainMeowBalance || 0).toString();
+            clearSwapQuote();
+        }
+
+        function clearSwapQuote() {
+            state.lastMeowUsdtQuote = null;
+            const output = document.getElementById('swapUsdtOutput');
+            const rate = document.getElementById('swapRateOutput');
+            if (output) output.innerText = '0.0000';
+            if (rate) rate.innerText = 'Cotización todavía no consultada.';
+            const status = document.getElementById('withdrawalStatus');
+            if (status) status.innerText = 'Esperando cotización';
+            const review = document.getElementById('withdrawalReviewBox');
+            if (review) review.classList.add('hidden');
+            updateWithdrawalControls();
+        }
+
+        async function getMintDecimals(mintAddress) {
+            const mintInfo = await state.solanaConnection.getParsedAccountInfo(new solanaWeb3.PublicKey(mintAddress), 'confirmed');
+            return mintInfo.value?.data?.parsed?.info?.decimals;
+        }
+
+        function toAtomicAmount(uiAmount, decimals) {
+            const value = String(uiAmount).trim();
+            if (!/^\d+(\.\d+)?$/.test(value)) throw new Error('Cantidad inválida');
+            const [whole, fraction = ''] = value.split('.');
+            const padded = (fraction + '0'.repeat(decimals)).slice(0, decimals);
+            return BigInt(whole) * (10n ** BigInt(decimals)) + BigInt(padded || '0');
+        }
+
+        function formatAtomicAmount(raw, decimals) {
+            const n = BigInt(raw || '0');
+            const base = 10n ** BigInt(decimals);
+            const whole = n / base;
+            const fraction = n % base;
+            if (decimals === 0) return whole.toString();
+            const frac = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+            return frac ? `${whole}.${frac}` : whole.toString();
+        }
+
+        async function getMeowUsdtQuote() {
+            if (!state.solanaWalletAddress || !MEOW_MINT_ADDRESS) {
+                updateSwapControls();
+                return;
+            }
+            const amountInput = document.getElementById('swapMeowAmount');
+            const amount = amountInput.value.trim();
+            const info = document.getElementById('swapQuoteInfo');
+            const output = document.getElementById('swapUsdtOutput');
+            const rate = document.getElementById('swapRateOutput');
+            const network = document.getElementById('withdrawalNetwork').value;
+            const status = document.getElementById('withdrawalStatus');
+            try {
+                if (!amount || Number(amount) <= 0) throw new Error('Escribe una cantidad válida de $MEOW.');
+                if (Number(amount) > state.onchainMeowBalance) throw new Error('La cantidad supera tu saldo $MEOW disponible en la wallet.');
+                if (!state.solanaConnection) initSolanaConnection();
+                const decimals = await getMintDecimals(MEOW_MINT_ADDRESS);
+                if (typeof decimals !== 'number') throw new Error('No se pudo leer los decimales del mint de $MEOW.');
+                const atomicAmount = toAtomicAmount(amount, decimals).toString();
+                const url = new URL(JUPITER_QUOTE_URL);
+                url.searchParams.set('inputMint', MEOW_MINT_ADDRESS);
+                url.searchParams.set('outputMint', USDT_MINT_ADDRESS);
+                url.searchParams.set('amount', atomicAmount);
+                url.searchParams.set('slippageBps', String(DEFAULT_SWAP_SLIPPAGE_BPS));
+
+                info.innerText = 'Consultando cotización de mercado...';
+                status.innerText = 'Consultando';
+                const response = await fetch(url.toString());
+                if (!response.ok) throw new Error(`No se pudo obtener la cotización (${response.status}).`);
+                const quote = await response.json();
+                if (!quote?.outAmount) throw new Error('No existe una ruta disponible para este intercambio.');
+
+                state.lastMeowUsdtQuote = quote;
+                const usdtDecimals = 6;
+                const out = Number(formatAtomicAmount(quote.outAmount, usdtDecimals));
+                output.innerText = out.toFixed(6);
+                rate.innerText = `${getWithdrawalNetworkLabel(network)} • resultado estimado sujeto al mercado • slippage ${(DEFAULT_SWAP_SLIPPAGE_BPS / 100).toFixed(2)}%`;
+                info.innerText = 'Cotización obtenida. Revisa cuidadosamente la red y la dirección de recepción antes de continuar.';
+                status.innerText = 'Cotización lista';
+                updateWithdrawalControls();
+            } catch (error) {
+                state.lastMeowUsdtQuote = null;
+                output.innerText = '0.0000';
+                rate.innerText = 'No hay cotización disponible.';
+                status.innerText = 'Error de cotización';
+                info.innerText = error.message || 'No se pudo obtener la cotización.';
+                updateWithdrawalControls();
+            }
+        }
+
+        function prepareUsdtWithdrawal() {
+            const amount = Number(document.getElementById('swapMeowAmount')?.value || 0);
+            const network = document.getElementById('withdrawalNetwork')?.value || 'ethereum';
+            const address = document.getElementById('withdrawalAddress')?.value.trim() || '';
+            const quote = state.lastMeowUsdtQuote;
+            if (!quote || !amount || amount <= 0) {
+                showNotification('Primero obtén una cotización para continuar.');
+                return;
+            }
+            if (!isValidWithdrawalAddress(network, address)) {
+                showNotification(`La dirección no tiene un formato válido para ${getWithdrawalNetworkLabel(network)}.`);
+                return;
+            }
+            const usdtOut = Number(formatAtomicAmount(quote.outAmount, 6));
+            const review = document.getElementById('withdrawalReviewBox');
+            const reviewText = document.getElementById('withdrawalReviewText');
+            reviewText.innerHTML = `Vas a convertir <strong class="text-white">${amount.toLocaleString('en-US')} $MEOW</strong> por aproximadamente <strong class="text-cyan-300">${usdtOut.toFixed(6)} USDT</strong> y solicitar el envío por <strong class="text-white">${getWithdrawalNetworkLabel(network)}</strong> a la dirección <span class="text-slate-300 break-all">${address}</span>.`;
+            review.classList.remove('hidden');
+            document.getElementById('withdrawalStatus').innerText = 'Listo para confirmar';
+        }
+
+        function submitUsdtWithdrawalRequest() {
+            const amount = Number(document.getElementById('swapMeowAmount')?.value || 0);
+            const network = document.getElementById('withdrawalNetwork')?.value || 'ethereum';
+            const address = document.getElementById('withdrawalAddress')?.value.trim() || '';
+            if (!state.lastMeowUsdtQuote || !isValidWithdrawalAddress(network, address) || !amount || amount <= 0) {
+                showNotification('Revisa la cantidad, la cotización, la red y la dirección.');
+                return;
+            }
+            const usdtOut = Number(formatAtomicAmount(state.lastMeowUsdtQuote.outAmount, 6));
+            document.getElementById('withdrawalStatus').innerText = 'Solicitud preparada';
+            document.getElementById('swapQuoteInfo').innerText = `Solicitud preparada: ${amount.toFixed(4)} MEOW → ~${usdtOut.toFixed(6)} USDT por ${getWithdrawalNetworkLabel(network)}. La transferencia real se ejecutará desde el backend una vez conectado el módulo de liquidación.`;
+            showNotification('La solicitud quedó preparada con la red y dirección indicadas.');
+        }
+
+        function updateSwapControls() {
+            updateWithdrawalControls();
+        }
+
+        function updateWithdrawalControls() {
+            const quoteBtn = document.getElementById('getSwapQuoteBtn');
+            const swapBtn = document.getElementById('executeSwapBtn');
+            const info = document.getElementById('swapQuoteInfo');
+            if (!quoteBtn || !swapBtn || !info) return;
+
+            const amount = Number(document.getElementById('swapMeowAmount')?.value || 0);
+            const address = document.getElementById('withdrawalAddress')?.value.trim() || '';
+            const network = document.getElementById('withdrawalNetwork')?.value || 'ethereum';
+            const quoteReady = !!state.lastMeowUsdtQuote;
+            const walletReady = !!state.solanaWalletAddress;
+            const mintReady = !!MEOW_MINT_ADDRESS;
+
+            const canQuote = walletReady && mintReady && amount > 0 && amount <= Number(state.onchainMeowBalance || 0);
+            quoteBtn.disabled = !canQuote;
+            quoteBtn.className = canQuote
+                ? 'w-full mt-4 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-2xl'
+                : 'w-full mt-4 py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed';
+
+            const validAddress = isValidWithdrawalAddress(network, address);
+            const canReview = quoteReady && amount > 0 && validAddress;
+            swapBtn.disabled = !canReview;
+            swapBtn.className = canReview
+                ? 'w-full mt-3 py-3.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-2xl'
+                : 'w-full mt-3 py-3.5 bg-slate-800 text-slate-500 font-bold rounded-2xl cursor-not-allowed';
+
+            if (!walletReady) info.innerText = 'Conecta tu wallet de Solana para consultar tu saldo on-chain.';
+            else if (!mintReady) info.innerText = 'La dirección Mint de $MEOW todavía no está configurada. El intercambio se habilitará después de crear el token oficial en Solana.';
+            else if (!canQuote) info.innerText = 'Escribe una cantidad de $MEOW que no supere tu saldo disponible en blockchain y obtén una cotización.';
+            else if (!quoteReady) info.innerText = 'Obtén una cotización antes de revisar el retiro.';
+            else if (!validAddress) info.innerText = `Pega una dirección pública válida para ${getWithdrawalNetworkLabel(network)}.`;
         }
 
         // =========================
